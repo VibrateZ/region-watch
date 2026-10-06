@@ -1,0 +1,5 @@
+{
+  "identifier": "desktop",
+  "windows": ["main", "picker"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}

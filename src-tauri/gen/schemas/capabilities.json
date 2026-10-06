@@ -1,1 +1,1 @@
-{}
+{"desktop":{"identifier":"desktop","description":"","local":true,"windows":["main","picker"],"permissions":["core:default","core:window:allow-close"]}}

@@ -7,7 +7,9 @@ use std::time::Duration;
 use tauri::{AppHandle, State, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_notification::NotificationExt;
 use windows::Win32::Foundation::HWND;
-use base64::Engine;`r`nuse windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics;`r`nuse windows::Win32::Graphics::Gdi::{BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY};
+use base64::Engine;
+use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics,SYSTEM_METRICS_INDEX};
+use windows::Win32::Graphics::Gdi::{BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY};
 
 #[derive(Clone, Serialize)]
 struct Status { running: bool, message: String }
@@ -21,6 +23,12 @@ fn capture(x:i32,y:i32,w:i32,h:i32)->Vec<u8>{ unsafe {
 fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32,interval_ms:u64,threshold:f32,duration_ms:u64)->Result<(),String>{
  if w<2||h<2{return Err("区域尺寸无效".into())}; let mut slot=state.0.lock().unwrap(); if slot.is_some(){return Err("监测已在运行".into())}; let stop=Arc::new(AtomicBool::new(false)); let stop_thread=stop.clone(); let handle=thread::spawn(move||{let mut base=capture(x,y,w,h); let mut changed_since:Option<std::time::Instant>=None; while !stop_thread.load(Ordering::Relaxed) { thread::sleep(Duration::from_millis(interval_ms.max(100))); if stop_thread.load(Ordering::Relaxed){break} let now=capture(x,y,w,h); let different=base.iter().zip(now.iter()).filter(|(a,b)|(**a as i16-**b as i16).abs()>threshold as i16).count() as f32/base.len() as f32; if different>0.03 {if changed_since.is_none(){changed_since=Some(std::time::Instant::now())} if changed_since.unwrap().elapsed().as_millis()>=duration_ms as u128 {let _=app.notification().builder().title("区域变化监测").body("检测区域发生持续变化").show(); let _=app.emit("region-changed",()); changed_since=None; base=now;}} else {changed_since=None;} }}); *slot=Some((handle,stop)); Ok(())
 }
+#[derive(serde::Serialize)]
+struct ScreenShot { x:i32, y:i32, width:i32, height:i32, stride:i32, data:String }
+#[tauri::command]
+fn screen_snapshot()->ScreenShot {
+ let w=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(0))}; let h=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(1))}; let raw=capture(0,0,w,h); ScreenShot{x:0,y:0,width:w,height:h,stride:((w*3+3)/4)*4,data:base64::engine::general_purpose::STANDARD.encode(raw)}
+}
 #[tauri::command] fn open_picker(app:AppHandle)->Result<(),String>{
  let _=app.get_webview_window("picker");
  WebviewWindowBuilder::new(&app,"picker",WebviewUrl::App("picker.html".into())).title("拖动选择区域").decorations(false).transparent(true).always_on_top(true).fullscreen(true).build().map(|_|()).map_err(|e|e.to_string())
@@ -28,6 +36,9 @@ fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32
 #[tauri::command] fn stop_monitor(state:State<MonitorState>){ if let Some((handle,stop))=state.0.lock().unwrap().take(){ stop.store(true,Ordering::Relaxed); let _=handle.join(); } }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){ tauri::Builder::default().plugin(tauri_plugin_notification::init()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker,screen_snapshot]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+
+
+
 
 
 

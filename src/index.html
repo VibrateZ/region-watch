@@ -1,2 +1,23 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>区域变化监测器</title><style>body{font:15px system-ui;padding:24px;background:#f6f7fb;color:#202124}h2{margin-top:0}label{display:block;margin:14px 0}input{float:right;width:180px}button{padding:9px 16px;margin-right:8px}.pick{background:#2473dc;color:#fff;border:0;border-radius:5px}.hint{font-size:13px;color:#666}#status{margin-top:18px;color:#555}</style><h2>区域变化监测器</h2><p class="hint">点击“选择区域”，直接在屏幕上拖动框选要监测的区域。</p><button id=pick class=pick>选择屏幕区域</button><label>X <input id=x type=number value=0></label><label>Y <input id=y type=number value=0></label><label>宽度 <input id=w type=number value=120></label><label>高度 <input id=h type=number value=80></label><label>轮询间隔（毫秒）<input id=i type=number value=500 min=100></label><label>像素变化阈值（0-765）<input id=t type=number value=75 min=1></label><label>持续变化时间（毫秒）<input id=d type=number value=3000 min=100></label><p><button id=start>开始监测</button><button id=stop>停止</button></p><div id=status>未运行</div><script>const{invoke}=window.__TAURI__.core;const $=id=>document.getElementById(id);const status=document.getElementById('status');pick.onclick=async()=>{try{await invoke('open_picker')}catch(e){status.textContent='打开框选失败：'+e}};window.__TAURI__.event.listen('region-selected',e=>{x.value=e.payload.x;y.value=e.payload.y;w.value=e.payload.w;h.value=e.payload.h;status.textContent=`已选择区域：${e.payload.w} × ${e.payload.h}`});start.onclick=async()=>{try{await invoke('start_monitor',{x:+x.value,y:+y.value,w:+w.value,h:+h.value,intervalMs:+i.value,threshold:+t.value,durationMs:+d.value});status.textContent='监测中（可最小化）'}catch(e){status.textContent=e}};stop.onclick=async()=>{await invoke('stop_monitor');status.textContent='已停止'};window.__TAURI__.event.listen('region-changed',()=>status.textContent='检测到持续变化，已发送通知');</script></html>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>区域变化监测器</title><style>body{font:15px system-ui;padding:24px;background:#f6f7fb;color:#202124}h2{margin-top:0}label{display:block;margin:14px 0}input{float:right;width:180px}button{padding:9px 16px;margin-right:8px}.pick{background:#2473dc;color:#fff;border:0;border-radius:5px}.hint{font-size:13px;color:#666}#status{margin-top:18px;color:#555}</style><h2>区域变化监测器</h2><p class="hint">点击“选择区域”，直接在屏幕上拖动框选要监测的区域。</p><button id=pick class=pick>选择屏幕区域</button><label>X <input id=x type=number value=0></label><label>Y <input id=y type=number value=0></label><label>宽度 <input id=w type=number value=120></label><label>高度 <input id=h type=number value=80></label><label>轮询间隔（毫秒）<input id=i type=number value=500 min=100></label><label>像素变化阈值（0-765）<input id=t type=number value=75 min=1></label><label>持续变化时间（毫秒）<input id=d type=number value=3000 min=100></label><p><button id=start>开始监测</button><button id=stop>停止</button></p><div id=status>未运行</div><script>
+const {invoke}=window.__TAURI__.core;
+const $=id=>document.getElementById(id);
+const status=$('status'), startButton=$('start'), stopButton=$('stop');
+let busy=false;
+$('pick').onclick=async()=>{try{await invoke('open_picker')}catch(e){status.textContent='打开框选失败：'+e}};
+window.__TAURI__.event.listen('region-selected',e=>{for(const id of ['x','y','w','h']) $(id).value=e.payload[id];status.textContent=`已选择区域：${e.payload.w} × ${e.payload.h}`});
+startButton.onclick=async()=>{
+ if(busy)return; busy=true; startButton.disabled=true;
+ try{await invoke('start_monitor',{x:+$('x').value,y:+$('y').value,w:+$('w').value,h:+$('h').value,intervalMs:+$('i').value,threshold:+$('t').value,durationMs:+$('d').value});status.textContent='监测中（可最小化）'}
+ catch(e){status.textContent=String(e)}
+ finally{busy=false;startButton.disabled=false}
+};
+stopButton.onclick=async()=>{
+ stopButton.disabled=true;
+ try{await invoke('stop_monitor');status.textContent='已停止'}
+ catch(e){status.textContent='停止失败：'+e}
+ finally{stopButton.disabled=false}
+};
+window.__TAURI__.event.listen('region-changed',()=>{status.textContent='检测到持续变化，已发送通知'});
+</script></html>
+
 

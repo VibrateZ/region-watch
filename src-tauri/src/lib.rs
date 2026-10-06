@@ -21,7 +21,7 @@ fn capture(x:i32,y:i32,w:i32,h:i32)->Vec<u8>{ unsafe {
 }
 #[tauri::command]
 fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32,interval_ms:u64,threshold:f32,duration_ms:u64)->Result<(),String>{
- if w<2||h<2{return Err("区域尺寸无效".into())}; let mut slot=state.0.lock().unwrap(); if slot.is_some(){return Err("监测已在运行".into())}; let stop=Arc::new(AtomicBool::new(false)); let stop_thread=stop.clone(); let handle=thread::spawn(move||{let mut base=capture(x,y,w,h); let mut changed_since:Option<std::time::Instant>=None; while !stop_thread.load(Ordering::Relaxed) { thread::sleep(Duration::from_millis(interval_ms.max(100))); if stop_thread.load(Ordering::Relaxed){break} let now=capture(x,y,w,h); let different=base.iter().zip(now.iter()).filter(|(a,b)|(**a as i16-**b as i16).abs()>threshold as i16).count() as f32/base.len() as f32; if different>0.03 {if changed_since.is_none(){changed_since=Some(std::time::Instant::now())} if changed_since.unwrap().elapsed().as_millis()>=duration_ms as u128 {let _=app.notification().builder().title("区域变化监测").body("检测区域发生持续变化").show(); let _=app.emit("region-changed",()); changed_since=None; base=now;}} else {changed_since=None;} }}); *slot=Some((handle,stop)); Ok(())
+ if w<2||h<2{return Err("区域尺寸无效".into())}; let mut slot=state.0.lock().unwrap(); if slot.is_some(){return Err("监测已在运行".into())}; let stop=Arc::new(AtomicBool::new(false)); let stop_thread=stop.clone(); let handle=thread::spawn(move||{let mut base=capture(x,y,w,h); let mut changed_since:Option<std::time::Instant>=None; while !stop_thread.load(Ordering::Relaxed) { thread::park_timeout(Duration::from_millis(interval_ms.max(100))); if stop_thread.load(Ordering::Relaxed){break} let now=capture(x,y,w,h); let different=base.iter().zip(now.iter()).filter(|(a,b)|(**a as i16-**b as i16).abs()>threshold as i16).count() as f32/base.len() as f32; if different>0.03 {if changed_since.is_none(){changed_since=Some(std::time::Instant::now())} if changed_since.unwrap().elapsed().as_millis()>=duration_ms as u128 {let _=app.notification().builder().title("区域变化监测").body("检测区域发生持续变化").show(); let _=app.emit("region-changed",()); changed_since=None; base=now;}} else {changed_since=None;} }}); *slot=Some((handle,stop)); Ok(())
 }
 #[derive(Clone, serde::Serialize)]
 struct ScreenShot { x:i32, y:i32, width:i32, height:i32, stride:i32, data:String }
@@ -43,9 +43,21 @@ fn capture_snapshot()->ScreenShot {
 }
 #[tauri::command] fn finish_picker(app:AppHandle,x:i32,y:i32,w:i32,h:i32)->Result<(),String>{ app.emit("region-selected",serde_json::json!({"x":x,"y":y,"w":w,"h":h})).map_err(|e|e.to_string())?; if let Some(picker)=app.get_webview_window("picker"){ picker.close().map_err(|e|e.to_string())?; } Ok(()) }
 #[tauri::command] fn cancel_picker(app:AppHandle)->Result<(),String>{ if let Some(picker)=app.get_webview_window("picker"){ picker.close().map_err(|e|e.to_string())?; } Ok(()) }
-#[tauri::command] fn stop_monitor(state:State<MonitorState>){ if let Some((handle,stop))=state.0.lock().unwrap().take(){ stop.store(true,Ordering::Relaxed); let _=handle.join(); } }
+#[tauri::command] async fn stop_monitor(app:AppHandle)->Result<(),String>{
+ tauri::async_runtime::spawn_blocking(move || {
+ let state=app.state::<MonitorState>();
+ let mut slot=state.0.lock().unwrap();
+ if let Some((handle,stop))=slot.take(){
+  stop.store(true,Ordering::Relaxed);
+  handle.thread().unpark();
+  handle.join().map_err(|_|"检测线程异常退出".to_string())?;
+ }
+ Ok(())
+ }).await.map_err(|e|e.to_string())?
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){ tauri::Builder::default().plugin(tauri_plugin_notification::init()).manage(PickerSnapshot::default()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker,screen_snapshot,finish_picker,cancel_picker]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+
 
 
 

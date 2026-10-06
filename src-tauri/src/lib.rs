@@ -27,7 +27,7 @@ fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32
 struct ScreenShot { x:i32, y:i32, width:i32, height:i32, stride:i32, data:String }
 #[tauri::command]
 fn screen_snapshot()->ScreenShot {
- let w=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(0))}; let h=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(1))}; let raw=capture(0,0,w,h); ScreenShot{x:0,y:0,width:w,height:h,stride:((w*3+3)/4)*4,data:base64::engine::general_purpose::STANDARD.encode(raw)}
+ let w=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(0))}; let h=unsafe{GetSystemMetrics(SYSTEM_METRICS_INDEX(1))}; let raw=capture(0,0,w,h); let stride=((w*3+3)/4)*4; let mut png_data=Vec::new(); { let mut enc=png::Encoder::new(&mut png_data,w as u32,h as u32); enc.set_color(png::ColorType::Rgb); enc.set_depth(png::BitDepth::Eight); let mut writer=enc.write_header().unwrap(); let mut row=vec![0u8;(w*3) as usize]; for y in 0..h as usize { for x in 0..w as usize { let si=y*stride as usize+x*3; let di=x*3; row[di]=raw[si+2]; row[di+1]=raw[si+1]; row[di+2]=raw[si]; } writer.write_image_data(&row).unwrap(); } } ScreenShot{x:0,y:0,width:w,height:h,stride:0,data:base64::engine::general_purpose::STANDARD.encode(png_data)}
 }
 #[tauri::command] fn open_picker(app:AppHandle)->Result<(),String>{
  let _=app.get_webview_window("picker");
@@ -36,6 +36,7 @@ fn screen_snapshot()->ScreenShot {
 #[tauri::command] fn stop_monitor(state:State<MonitorState>){ if let Some((handle,stop))=state.0.lock().unwrap().take(){ stop.store(true,Ordering::Relaxed); let _=handle.join(); } }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){ tauri::Builder::default().plugin(tauri_plugin_notification::init()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker,screen_snapshot]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+
 
 
 

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "区域变化监测器",
+  "version": "0.1.0",
+  "identifier": "com.local.regionwatch",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "区域变化监测器",
+        "width": 560,
+        "height": 520,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
+    },
+    "icon": [
+      "icons/icon.ico"
+    ]
+  }
+}

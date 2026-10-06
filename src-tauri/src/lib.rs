@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::ptr::null_mut;
 use std::time::Duration;
-use tauri::{AppHandle, State, Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, State, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_notification::NotificationExt;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY};
@@ -28,6 +28,7 @@ fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32
 #[tauri::command] fn stop_monitor(state:State<MonitorState>){ if let Some((handle,stop))=state.0.lock().unwrap().take(){ stop.store(true,Ordering::Relaxed); let _=handle.join(); } }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(){ tauri::Builder::default().plugin(tauri_plugin_notification::init()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+
 
 
 

@@ -1,19 +1,27 @@
-use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::ptr::null_mut;
 use std::time::Duration;
 use tauri::{AppHandle, State, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_notification::NotificationExt;
-use windows::Win32::Foundation::HWND;
+mod notifications;
 use base64::Engine;
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics,SYSTEM_METRICS_INDEX};
 use windows::Win32::Graphics::Gdi::{BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, SRCCOPY};
 
-#[derive(Clone, Serialize)]
-struct Status { running: bool, message: String }
 struct MonitorState(Arc<Mutex<Option<(thread::JoinHandle<()>, Arc<AtomicBool>)>>>);
+
+fn validate_threshold(threshold: f32) -> Result<(), String> {
+ if !threshold.is_finite() || !(0.0..=254.0).contains(&threshold) {
+  return Err("颜色通道变化阈值必须在 0–254 之间".into());
+ }
+ Ok(())
+}
+
+#[tauri::command]
+async fn test_notification(app: AppHandle) -> Result<(), String> {
+ tauri::async_runtime::spawn_blocking(move || notifications::send(&app, "这是一条测试通知，区域变化监测器的通知功能可用。"))
+  .await.map_err(|e| e.to_string())?
+}
 
 fn capture(x:i32,y:i32,w:i32,h:i32)->Vec<u8>{ unsafe {
  let screen=GetDC(None); let dc=CreateCompatibleDC(Some(screen)); let bmp=CreateCompatibleBitmap(screen,w,h); SelectObject(dc,bmp.into()); BitBlt(dc,0,0,w,h,Some(screen),x,y,SRCCOPY);
@@ -21,7 +29,13 @@ fn capture(x:i32,y:i32,w:i32,h:i32)->Vec<u8>{ unsafe {
 }
 #[tauri::command]
 fn start_monitor(app:AppHandle,state:State<MonitorState>,x:i32,y:i32,w:i32,h:i32,interval_ms:u64,threshold:f32,duration_ms:u64)->Result<(),String>{
- if w<2||h<2{return Err("区域尺寸无效".into())}; let mut slot=state.0.lock().unwrap(); if slot.is_some(){return Err("监测已在运行".into())}; let stop=Arc::new(AtomicBool::new(false)); let stop_thread=stop.clone(); let handle=thread::spawn(move||{let mut base=capture(x,y,w,h); let mut changed_since:Option<std::time::Instant>=None; while !stop_thread.load(Ordering::Relaxed) { thread::park_timeout(Duration::from_millis(interval_ms.max(100))); if stop_thread.load(Ordering::Relaxed){break} let now=capture(x,y,w,h); let different=base.iter().zip(now.iter()).filter(|(a,b)|(**a as i16-**b as i16).abs()>threshold as i16).count() as f32/base.len() as f32; if different>0.03 {if changed_since.is_none(){changed_since=Some(std::time::Instant::now())} if changed_since.unwrap().elapsed().as_millis()>=duration_ms as u128 {let _=app.notification().builder().title("区域变化监测").body("检测区域发生持续变化").show(); let _=app.emit("region-changed",()); changed_since=None; base=now;}} else {changed_since=None;} }}); *slot=Some((handle,stop)); Ok(())
+ validate_threshold(threshold)?;
+ if w<2||h<2{return Err("区域尺寸无效".into())}; let mut slot=state.0.lock().unwrap(); if slot.is_some(){return Err("监测已在运行".into())}; let stop=Arc::new(AtomicBool::new(false)); let stop_thread=stop.clone(); let handle=thread::spawn(move||{let mut base=capture(x,y,w,h); let mut changed_since:Option<std::time::Instant>=None; while !stop_thread.load(Ordering::Relaxed) { thread::park_timeout(Duration::from_millis(interval_ms.max(100))); if stop_thread.load(Ordering::Relaxed){break} let now=capture(x,y,w,h); let different=base.iter().zip(now.iter()).filter(|(a,b)|(**a as i16-**b as i16).abs()>threshold as i16).count() as f32/base.len() as f32; if different>0.03 {if changed_since.is_none(){changed_since=Some(std::time::Instant::now())} if changed_since.unwrap().elapsed().as_millis()>=duration_ms as u128 {
+  match notifications::send(&app, "检测区域发生持续变化") {
+   Ok(()) => { let _ = app.emit("region-changed", ()); }
+   Err(error) => { eprintln!("通知失败：{error}"); let _ = app.emit("notification-error", error); }
+  }
+  changed_since=None; base=now;}} else {changed_since=None;} }}); *slot=Some((handle,stop)); Ok(())
 }
 #[derive(Clone, serde::Serialize)]
 struct ScreenShot { x:i32, y:i32, width:i32, height:i32, stride:i32, data:String }
@@ -56,7 +70,17 @@ fn capture_snapshot()->ScreenShot {
  }).await.map_err(|e|e.to_string())?
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(){ tauri::Builder::default().plugin(tauri_plugin_notification::init()).manage(PickerSnapshot::default()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker,screen_snapshot,finish_picker,cancel_picker]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+pub fn run(){ tauri::Builder::default().manage(notifications::Notifications::default()).manage(PickerSnapshot::default()).manage(MonitorState(Arc::new(Mutex::new(None)))).invoke_handler(tauri::generate_handler![start_monitor,stop_monitor,open_picker,screen_snapshot,finish_picker,cancel_picker,test_notification]).run(tauri::generate_context!()).expect("error while running tauri application"); }
+
+#[cfg(test)]
+mod tests {
+ use super::validate_threshold;
+ #[test]
+ fn threshold_rejects_values_that_cannot_detect_changes() {
+  for value in [0.0, 75.0, 254.0] { assert!(validate_threshold(value).is_ok()); }
+  for value in [-1.0, 255.0, 765.0, f32::NAN, f32::INFINITY] { assert!(validate_threshold(value).is_err()); }
+ }
+}
 
 
 

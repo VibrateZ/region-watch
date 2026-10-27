@@ -1,6 +1,6 @@
 [package]
 name = "region-watch"
-version = "0.1.2"
+version = "0.2.0"
 description = "Low overhead screen region change monitor"
 authors = ["Codex"]
 edition = "2021"
